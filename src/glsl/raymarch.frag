@@ -193,6 +193,8 @@ float mapTorusPreset(vec3 p) {
 
 #define SACRED_PI 3.14159265
 #define GIRIH_Z 2.4
+#define GIRIH_PUPIL_Z 11.0
+#define GIRIH_PUPIL_R 0.11
 
 vec2 kaleido2(vec2 p, float n) {
   float a = atan(p.y, p.x);
@@ -202,61 +204,252 @@ vec2 kaleido2(vec2 p, float n) {
   return vec2(cos(a), sin(a)) * r;
 }
 
+float girihScroll() {
+  return uTime * 0.28;
+}
+
+// Slow rigid turn of the whole girih assembly around the view axis.
+float girihWorldRot() {
+  return uTime * 0.07;
+}
+
+// Circular frame; sphere body is added in 3D in girihDisc.
+float sdGirihSphereBadge(vec2 p, float s, float thick) {
+  p /= s;
+  float t = max(thick / s * 1.35, 0.02);
+  return (abs(length(p) - 0.58) - t * 0.95) * s;
+}
+
+// Inward light wave: front travels from outer rim -> center, then repeats.
+float girihInwardPulse(float rad) {
+  float outer = 1.1;
+  float period = 5.5;
+  float phase = fract(uTime / period);
+  float front = mix(outer, -0.05, phase);
+  float band = exp(-pow((rad - front) * 10.0, 2.0)) * 0.45;
+  float wash = smoothstep(front + 0.2, front - 0.02, rad) * exp(-phase * 1.8) * 0.12;
+  float core = exp(-rad * rad * 14.0) * smoothstep(0.55, 1.0, phase) * 0.2;
+  return band + wash + core;
+}
+
 float sdGirihRosette(vec2 p, float thick) {
   float d = 1e9;
+  // Larger medallion — reaches toward the aura with open negative space.
+  const float fit = 1.15;
+  p /= fit;
+  float r = length(p);
   vec2 ap = abs(p);
+  // Polygonal frames from abs() are exact enough and seam-free (no angular fold).
+  float oct = max(ap.x, ap.y);
+  float dia = (ap.x + ap.y) * 0.70710678;
+  float star = max(oct, dia);
+  float t = thick * 0.8 / fit;
 
-  // Dense 8-fold girih: frames, stars, and interlocking arcs near the hub.
-  d = min(d, abs(max(ap.x, ap.y) - 1.05) - thick);
-  d = min(d, abs(ap.x + ap.y - 1.12) - thick);
-  d = min(d, abs(ap.x - ap.y) - thick * 0.95);
-  d = min(d, abs(ap.x - 0.62) - thick * 0.92);
-  d = min(d, abs(ap.y - 0.62) - thick * 0.92);
-  d = min(d, abs(length(p) - 0.95) - thick * 0.9);
-  d = min(d, abs(length(p) - 0.62) - thick * 0.88);
-  d = min(d, abs(length(p) - 0.34) - thick * 0.85);
-  d = min(d, abs(length(p) - 0.14) - thick * 0.8);
-  d = min(d, abs(length(p - vec2(0.62, 0.0)) - 0.34) - thick * 0.82);
-  d = min(d, abs(length(p - vec2(0.34, 0.0)) - 0.34) - thick * 0.8);
-  d = min(d, length(p) - thick * 1.35);
+  // Outer khatam frame (octagon + diamond).
+  d = min(d, abs(oct - 1.02) - t);
+  d = min(d, abs(dia - 1.02) - t);
 
-  return d;
+  // One inner 8-pointed star — kept inward of the badge ring.
+  d = min(d, abs(star - 0.42) - t * 0.92);
+
+  // Square chord straps — inward, clear of badge seats.
+  float chordX = abs(ap.x - 0.4) - t * 0.85;
+  chordX = max(chordX, ap.y - 0.4);
+  float chordY = abs(ap.y - 0.4) - t * 0.85;
+  chordY = max(chordY, ap.x - 0.4);
+  d = min(d, min(chordX, chordY));
+
+  // Construction rings.
+  d = min(d, abs(r - 0.88) - t * 0.9);
+  d = min(d, abs(r - 0.34) - t * 0.85);
+
+  // Inner rim around the flight aperture.
+  d = min(d, abs(r - 0.2) - t * 0.85);
+
+  // Radials — stop before badge sockets.
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * (SACRED_PI * 0.25);
+    vec2 q = p * rot2(-a);
+    float strap = abs(q.y) - t * 0.85;
+    strap = max(strap, 0.18 - q.x);
+    strap = max(strap, q.x - 0.48);
+    d = min(d, strap);
+  }
+
+  // Ring of circular frames with spheres inside.
+  {
+    float ringR = 0.7;
+    float badgeS = 0.28;
+    for (int i = 0; i < 8; i++) {
+      float a = float(i) * (SACRED_PI * 0.25);
+      vec2 c = vec2(cos(a), sin(a)) * ringR;
+      float socket = length(p - c) - badgeS * 0.72;
+      d = max(d, -socket);
+      vec2 loc = p - c;
+      d = min(d, sdGirihSphereBadge(loc, badgeS, t));
+    }
+  }
+
+  // Finished outer border — perfect circle only.
+  d = min(d, abs(r - 1.08) - t * 1.15);
+
+  // Soft containment — keep the rim crisp.
+  d = smax(d, r - 1.12, 0.02);
+
+  float aperture = 0.18 / fit;
+  d = max(d, aperture - r);
+
+  return d * fit;
 }
 
 float girihDisc(vec3 q, float thick, float slab) {
-  q.xy = kaleido2(q.xy, 8.0);
+  // Rosette already encodes 8-fold symmetry — do not kaleido-fold (causes seams).
   float lines = sdGirihRosette(q.xy, thick);
-  // Bound to a disc so side copies don't dilute the centered tunnel.
-  float disc = length(q.xy) - 1.18;
-  lines = max(lines, disc);
+  float disc = length(q.xy) - 1.42;
+  lines = smax(lines, disc, 0.025);
   lines = max(lines, abs(q.z) - slab);
+
+  // True spheres seated in the circular frames (3D).
+  {
+    const float fit = 1.15;
+    float ringR = 0.7 * fit;
+    float sphR = 0.28 * fit * 0.34;
+    for (int i = 0; i < 8; i++) {
+      float a = float(i) * (SACRED_PI * 0.25);
+      vec3 c = vec3(cos(a) * ringR, sin(a) * ringR, 0.0);
+      lines = min(lines, length(q - c) - sphR);
+    }
+  }
   return lines;
 }
 
-float girihScroll() {
-  return uTime * 0.55;
+// Dense small mandala — the fixed "pupil" at infinity (camera space).
+float sdGirihPupilMandala(vec2 p, float thick) {
+  float d = 1e9;
+  float r = length(p);
+  vec2 ap = abs(p);
+  float oct = max(ap.x, ap.y);
+  float dia = (ap.x + ap.y) * 0.70710678;
+  float star = max(oct, dia);
+  float t = thick;
+
+  d = min(d, abs(r - 1.0) - t * 1.15);
+  d = min(d, abs(r - 0.78) - t * 0.95);
+  d = min(d, abs(r - 0.55) - t * 0.9);
+  d = min(d, abs(r - 0.34) - t * 0.85);
+  d = min(d, abs(r - 0.18) - t * 0.8);
+  d = min(d, abs(star - 0.88) - t * 0.95);
+  d = min(d, abs(star - 0.58) - t * 0.88);
+  d = min(d, abs(oct - 0.92) - t * 0.88);
+  d = min(d, abs(dia - 0.92) - t * 0.88);
+
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * (SACRED_PI * 0.25);
+    vec2 q = p * rot2(-a);
+    float strap = abs(q.y) - t * 0.72;
+    strap = max(strap, 0.1 - q.x);
+    strap = max(strap, q.x - 0.98);
+    d = min(d, strap);
+  }
+
+  // Solid core — the pupil iris center.
+  d = min(d, r - 0.09);
+  d = smax(d, r - 1.04, 0.018);
+  return d;
+}
+
+// Locked to the camera: fixed depth, never scrolls closer or grows.
+float girihPupil(vec3 p) {
+  float scale = GIRIH_PUPIL_R;
+  float thick = 0.016;
+  // Rotation comes from girihWorldRot() applied in mapSacred.
+  vec2 q = p.xy;
+  float lines = sdGirihPupilMandala(q / scale, thick / scale) * scale;
+  float disc = length(q) - scale;
+  lines = smax(lines, disc, 0.012);
+  lines = max(lines, abs(p.z - GIRIH_PUPIL_Z) - 0.03);
+  return lines;
+}
+
+// One 8-fold sector per Z cell so the next medallion continues the motif
+// instead of reprinting the same stamp (the usual "reset" read).
+float girihSpin(float zWorld) {
+  float scroll = girihScroll();
+  // Continuous twist only — no per-cell snaps or sin ease.
+  return scroll * 0.12;
+}
+
+// Volumetric shafts through the tunnel aperture (8-fold girih alignment).
+float girihGodRays(vec3 ro, vec3 rd, float maxT) {
+  float scroll = girihScroll();
+  float spin = girihSpin(ro.z + scroll) + girihWorldRot();
+  float rays = 0.0;
+  float lim = min(max(maxT, 4.0), 16.0);
+  for (int i = 0; i < 16; i++) {
+    float fi = (float(i) + 0.5) / 16.0;
+    float t = fi * lim;
+    vec3 sp = ro + rd * t;
+    float rad = length(sp.xy);
+    float core = exp(-rad * rad * 7.5);
+    float ang = atan(sp.y, sp.x) - spin * 0.65;
+    float spokes = pow(0.5 + 0.5 * cos(ang * 8.0), 4.0);
+    float dust = 0.65 + 0.35 * sin(sp.z * 2.2 + scroll * 2.8 + ang * 3.0);
+    float depth = exp(-t * 0.055);
+    rays += core * mix(0.2, 1.0, spokes) * dust * depth;
+  }
+  return rays * 0.035;
 }
 
 float mapSacred(vec3 p) {
+  // Entire structure turns slowly as one piece.
+  p.xy *= rot2(-girihWorldRot());
+
+  // Pupil stays in camera space — fixed size/distance forever.
+  float dPupil = girihPupil(p);
+
   float scroll = girihScroll();
   // World scrolls toward the camera; camera stays on the tunnel axis.
   p.z += scroll;
 
-  float qz = mod(p.z + GIRIH_Z * 0.5, GIRIH_Z) - GIRIH_Z * 0.5;
+  float zWorld = p.z;
+  float qz = mod(zWorld + GIRIH_Z * 0.5, GIRIH_Z) - GIRIH_Z * 0.5;
   vec3 q = vec3(p.xy, qz);
+  q.xy *= rot2(girihSpin(zWorld));
 
-  float spin = scroll * 0.11 + sin(scroll * 0.15) * (0.05 + uMid * 0.06);
-  q.xy *= rot2(spin);
-
-  float thick = 0.028 + uHigh * 0.01 + uRms * 0.006;
-  float slab = 0.07 + uBass * 0.012;
+  float thick = 0.02;
+  float slab = 0.065;
   float d = girihDisc(q, thick, slab);
 
-  // Outer tunnel ring keeps the periphery filled while you fly the hub.
-  float ring = abs(length(p.xy) - 1.35) - (0.045 + uMid * 0.02);
-  d = min(d, ring);
+  return min(d * 0.62, dPupil * 0.62);
+}
 
-  return d * 0.55;
+// Soft far-field girih shell — glow only, not a hard surface.
+float girihAura(vec3 p) {
+  p.xy *= rot2(-girihWorldRot());
+  float scroll = girihScroll();
+  p.z += scroll;
+  vec2 w = p.xy * rot2(-scroll * 0.1);
+  float rad = length(w);
+  vec2 aw = abs(w);
+  float oct = max(aw.x, aw.y);
+  float dia = (aw.x + aw.y) * 0.70710678;
+
+  float shell = abs(rad - 1.95) - 0.12;
+  float outer = abs(oct - 1.72) - 0.05;
+  float diamond = abs(dia - 1.72) - 0.045;
+  float star = abs(max(oct, dia) - 1.55) - 0.04;
+  star = max(star, abs(rad - 1.95) - 0.28);
+
+  float straps = 1e9;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * (SACRED_PI * 0.25);
+    vec2 q = w * rot2(-a);
+    float rib = abs(q.y) - 0.035;
+    rib = max(rib, abs(rad - 1.95) - 0.22);
+    straps = min(straps, rib);
+  }
+
+  return min(shell, min(outer, min(diamond, min(star, straps))));
 }
 
 void sacredCamera(out vec3 ro, out vec3 uu, out vec3 vv, out vec3 ww) {
@@ -283,6 +476,15 @@ vec3 calcNormal(vec3 p) {
     map(p + vec3(0.0, e, 0.0)) - d0,
     map(p + vec3(0.0, 0.0, e)) - d0
   ));
+}
+
+vec3 clampSacredHue(vec3 c) {
+  // Keep hue, soft-limit luminance so the medallion never flashes chalk-white.
+  float lum = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+  c *= min(lum, 0.58) / lum;
+  float peak = max(c.r, max(c.g, c.b));
+  if (peak > 0.72) c *= 0.72 / peak;
+  return max(c, vec3(0.0));
 }
 
 vec3 palForPreset(float t) {
@@ -322,13 +524,52 @@ vec3 palForPreset(float t) {
       vec3(0.12 + uBass * 0.32, 0.28 + uMid * 0.38, 0.55 + uHigh * 0.42)
     );
   }
-  return iqPalette(
+  // Warm girih hues with narrower amplitude — peaks stay amber, not white.
+  return clampSacredHue(iqPalette(
     t,
-    vec3(0.52, 0.46, 0.38),
-    vec3(0.48, 0.40, 0.36),
-    vec3(1.00, 0.92, 0.78),
-    vec3(0.82 + uBass * 0.12, 0.58 + uMid * 0.22, 0.12 + uHigh * 0.18)
-  );
+    vec3(0.42, 0.34, 0.28),
+    vec3(0.28, 0.24, 0.20),
+    vec3(1.00, 0.90, 0.72),
+    vec3(0.78 + uBass * 0.1, 0.52 + uMid * 0.18, 0.14 + uHigh * 0.14)
+  ));
+}
+
+// Soft fluid color wash expanding from center — background only, music-tinted.
+vec3 girihFluidWave(vec2 uv) {
+  float r = length(uv);
+  float ang = atan(uv.y, uv.x);
+  float music = uBass * 0.3 + uMid * 0.45 + uHigh * 0.35 + uBeat * 0.12;
+  float t = uTime * (0.2 + uMid * 0.06) + music * 0.2;
+
+  // Past mid-edges (~1.0) and into corners (~1.4+) so rings leave the frame.
+  float reach = 1.55;
+
+  // Gentle fluid distortion so rings feel liquid, not geometric.
+  float warp = vnoise(vec3(uv * 1.5, t * 0.3)) * (0.1 + uMid * 0.04)
+    + vnoise(vec3(uv * 2.8 + vec2(ang * 0.12, 0.0), t * 0.45 + uHigh * 0.35)) * 0.05;
+  float rr = r + warp;
+
+  float wave = 0.0;
+  for (int i = 0; i < 4; i++) {
+    float fi = float(i);
+    float phase = fract(t * (0.17 + fi * 0.035) + fi * 0.24 + uBass * 0.05);
+    float front = phase * reach;
+    float band = exp(-pow((rr - front) * 3.4, 2.0));
+    float trail = smoothstep(front + 0.08, front - 0.55, rr)
+      * (1.0 - phase) * 0.28;
+    wave += (band + trail) * (0.55 - fi * 0.08);
+  }
+
+  float wash = exp(-rr * 0.7) * (0.18 + 0.06 * sin(t * 0.65 + music));
+  float swirl = 0.5 + 0.5 * sin(ang * 3.0 + t * 0.35 + rr * 1.6 + uHigh * 1.1);
+  float field = wave * 0.55 + wash * 0.22 + swirl * wash * 0.12;
+
+  // Music drives hue; keep it a whisper over black.
+  float hueT = t * 0.12 + music * 0.55 + rr * 0.28 + ang * 0.05 + uHigh * 0.2;
+  vec3 tint = clampSacredHue(palForPreset(hueT));
+  float opacity = clamp(field * 0.16, 0.0, 0.18);
+  vec3 deep = vec3(0.008, 0.009, 0.016);
+  return mix(deep, tint, opacity);
 }
 
 void main() {
@@ -398,7 +639,7 @@ void main() {
     p = ro + rd * tMarch;
     float d = map(p);
     glow += exp(-abs(d) * 10.0) * (
-      lattice > 0.5 ? 0.022 : (torus > 0.5 ? 0.024 : (sacred > 0.5 ? 0.026 : 0.018))
+      lattice > 0.5 ? 0.022 : (torus > 0.5 ? 0.024 : (sacred > 0.5 ? 0.014 : 0.018))
     );
     if (lattice > 0.5) {
       vec3 ql = latticeLocal(p);
@@ -411,8 +652,16 @@ void main() {
       float innerGlow = exp(-mapToriOnly(p) * 14.0);
       haze += audioPal * innerGlow * (0.04 + uRms * 0.06) * exp(-tMarch * 0.012);
     } else if (sacred > 0.5) {
-      float mandala = exp(-mapSacred(p) * 9.0);
-      haze += audioPal * mandala * (0.05 + uMid * 0.06) * exp(-tMarch * 0.012);
+      float mandala = exp(-mapSacred(p) * 14.0);
+      float auraDist = girihAura(p);
+      float aura = exp(-abs(auraDist) * 5.5) * (0.4 + 0.35 * exp(-max(auraDist, 0.0) * 3.0));
+      float veil = smoothstep(1.25, 1.8, length(p.xy)) * smoothstep(2.4, 1.9, length(p.xy));
+      float depth = exp(-tMarch * 0.012);
+      // Audio shifts hue via audioPal only — intensities stay fixed.
+      haze += audioPal * mandala * 0.03 * depth;
+      haze += audioPal * aura * 0.05 * depth;
+      haze += audioPal * veil * 0.01 * depth;
+      haze += audioPal * girihInwardPulse(length(p.xy)) * 0.04 * depth;
     }
     if (d < SURF) {
       hit = 1.0;
@@ -424,6 +673,7 @@ void main() {
 
   vec3 col = vec3(0.012, 0.014, 0.03);
   float bg = fbm(vec3(uv * 2.1, uTime * 0.05));
+  vec3 bgWave = vec3(0.0);
 
   if (lattice > 0.5) {
     float neb = fbm(vec3(uv * 2.6 + uTime * 0.03, uTime * 0.07));
@@ -434,9 +684,11 @@ void main() {
     col = audioPal * (0.015 + cage * 0.012);
     col += palForPreset(bg + uMid * 0.2) * bg * 0.04;
   } else if (sacred > 0.5) {
+    bgWave = girihFluidWave(uv);
     float kbg = fbm(vec3(kaleido2(uv * 1.8, 8.0), uTime * 0.04));
-    col = audioPal * (0.018 + kbg * kbg * (0.028 + uMid * 0.03));
-    col += haze * (0.26 + uRms * 0.1);
+    col = bgWave;
+    col += audioPal * kbg * kbg * 0.006;
+    col += haze * 0.1;
   } else {
     col += palForPreset(bg + uHigh * 0.28 + spec * 0.22) * (0.05 + uHigh * 0.08) * bg;
   }
@@ -483,18 +735,27 @@ void main() {
     } else if (sacred > 0.5) {
       fog = exp(-tMarch * 0.01);
       float scroll = girihScroll();
-      vec3 qg = vec3(p.xy, mod(p.z + scroll + GIRIH_Z * 0.5, GIRIH_Z) - GIRIH_Z * 0.5);
-      qg.xy *= rot2(scroll * 0.11);
-      qg.xy = kaleido2(qg.xy, 8.0);
+      float zWorld = p.z + scroll;
+      vec2 qg = p.xy * rot2(girihSpin(zWorld));
+      float rad = length(qg);
+      float pulse = girihInwardPulse(rad);
+      float pupilHit = smoothstep(0.08, 0.0, abs(p.z - GIRIH_PUPIL_Z))
+        * smoothstep(GIRIH_PUPIL_R * 1.15, 0.0, length(p.xy));
+      // Color reacts to audio; lighting levels do not.
       albedo = palForPreset(
-        length(qg.xy) * 0.2 + uTime * 0.05 + uMid * 0.35 + uHigh * 0.25
+        rad * 0.2 + uTime * 0.05 + uMid * 0.35 + uHigh * 0.25 + pulse * 0.12
+          + pupilHit * 0.4
       );
-      float emit = 0.22 + uBass * 0.3 + uBeat * 0.14 + uMid * 0.18;
-      col = albedo * (0.18 + diff * 0.55 + emit)
-        + fres * audioPal * (0.36 + uHigh * 0.28)
-        + specu * vec3(1.0, 0.94, 0.72) * (0.18 + uHigh * 0.22);
-      col = mix(col, audioPal * 0.07, 1.0 - fog);
-      col *= mix(1.0, 0.86, fog);
+      float emit = 0.26 + pulse * 0.14 + pupilHit * 0.32;
+      vec3 surf = albedo * (0.16 + diff * 0.48 + emit)
+        + fres * audioPal * (0.28 + pulse * 0.1 + pupilHit * 0.16)
+        + specu * vec3(0.92, 0.72, 0.42) * 0.1;
+      surf += audioPal * pulse * 0.1;
+      surf += audioPal * pupilHit * 0.12;
+      surf = clampSacredHue(surf);
+      // Wave + haze stay behind the medallion; fog only reveals them in the distance.
+      col = mix(col, surf, fog);
+      col *= mix(1.0, 0.92, fog);
     } else {
       col = albedo * (0.12 + diff * 0.72)
         + specu * vec3(1.0, 0.96, 0.9) * (0.22 + uHigh * 0.28)
@@ -508,19 +769,36 @@ void main() {
   if (storm > 0.5) glowGain = 0.22 + uBass * 0.28;
   if (lattice > 0.5) glowGain = 0.18 + uBass * 0.2 + uBeat * 0.1 + uMid * 0.08;
   if (torus > 0.5) glowGain = 0.34 + uBass * 0.38 + uBeat * 0.16 + uMid * 0.12;
-  if (sacred > 0.5) glowGain = 0.3 + uBass * 0.34 + uBeat * 0.14 + uMid * 0.18 + uHigh * 0.1;
+  if (sacred > 0.5) glowGain = 0.2;
   col += palForPreset(uTime * 0.08 + length(uv)) * glow * glowGain;
-  col += palForPreset(length(uv) + uTime * 0.1) * uRms * 0.03;
+  if (sacred <= 0.5) {
+    col += palForPreset(length(uv) + uTime * 0.1) * uRms * 0.03;
+  }
   if (lattice > 0.5 && hit < 0.5) {
     col += audioPal * exp(-tMarch * 0.028) * (0.04 + uRms * 0.06 + uMid * 0.04);
   }
   if (torus > 0.5 && hit < 0.5) {
     col += audioPal * glow * (0.14 + uRms * 0.12 + uBass * 0.1);
   }
-  if (sacred > 0.5 && hit < 0.5) {
-    col += audioPal * glow * (0.12 + uRms * 0.14 + uMid * 0.08);
+  if (sacred > 0.5) {
+    float rayLen = hit > 0.5 ? tMarch : 14.0;
+    float rays = girihGodRays(ro, rd, rayLen);
+    float aperture = exp(-dot(uv, uv) * 3.2);
+    col += audioPal * rays * 0.28;
+    col += audioPal * rays * aperture * 0.1;
+    // Screen-space inward pulse toward center.
+    float uvPulse = girihInwardPulse(length(uv) * 2.2);
+    col += audioPal * uvPulse * 0.08;
+    col += audioPal * aperture * uvPulse * 0.1;
+    // Soft screen-space pupil glow — tight so a dark ring remains around it.
+    float pupilGlow = exp(-dot(uv, uv) * 110.0);
+    col += audioPal * pupilGlow * 0.07;
+    if (hit < 0.5) {
+      col += audioPal * glow * 0.05;
+    }
+    col = clampSacredHue(col);
   }
-  col = min(col, vec3(storm > 0.5 ? 1.15 : (torus > 0.5 ? 1.08 : (sacred > 0.5 ? 1.05 : mix(1.35, 0.92, lattice)))));
+  col = min(col, vec3(storm > 0.5 ? 1.15 : (torus > 0.5 ? 1.08 : (sacred > 0.5 ? 0.85 : mix(1.35, 0.92, lattice)))));
 
   gl_FragColor = vec4(col, 1.0);
 }

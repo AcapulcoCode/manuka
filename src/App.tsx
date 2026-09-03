@@ -70,30 +70,46 @@ export default function App() {
               }))
             })
         }}
+        onPrepareFile={() => {
+          void pipelineRef.current?.unlockAudio()
+        }}
         onFile={(file) => {
           void pipelineRef.current
             ?.loadFile(file)
             .then(() => {
+              const playing = pipelineRef.current?.playing ?? false
               setHud((h) => ({
                 ...h,
                 source: 'file',
-                playing: true,
+                playing,
                 fileName: file.name,
-                error: null,
+                error: playing ? null : 'Loaded — press Play to start',
               }))
             })
-            .catch(() => {
+            .catch((err: unknown) => {
+              const message =
+                err instanceof Error && err.message
+                  ? err.message
+                  : 'Could not play that file'
               setHud((h) => ({
                 ...h,
-                error: 'Could not play that file',
+                error: message,
               }))
             })
         }}
         onPause={() => {
-          void pipelineRef.current?.togglePause().then(() => {
-            const playing = pipelineRef.current?.playing ?? false
-            setHud((h) => ({ ...h, playing }))
-          })
+          void pipelineRef.current
+            ?.togglePause()
+            .then(() => {
+              const playing = pipelineRef.current?.playing ?? false
+              setHud((h) => ({ ...h, playing, error: null }))
+            })
+            .catch(() => {
+              setHud((h) => ({
+                ...h,
+                error: 'Playback was blocked — click Play again',
+              }))
+            })
         }}
         onPreset={(id) => {
           pipelineRef.current?.setPreset(id)

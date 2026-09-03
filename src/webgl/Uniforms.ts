@@ -53,5 +53,5 @@ export const PRESET_LOOK = [
   { decay: 0.38, warp: 0.12 },
   { decay: 0.44, warp: 0.45 },
   { decay: 0.5, warp: 0.62 },
-  { decay: 0.44, warp: 0.28 },
+  { decay: 0.3, warp: 0.1 },
 ] as const

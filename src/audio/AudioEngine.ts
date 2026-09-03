@@ -47,6 +47,11 @@ export class AudioEngine {
     this.analyser.getByteTimeDomainData(this.timeData)
   }
 
+  /** Call from a click handler so AudioContext is unlocked before the file dialog. */
+  async unlock(): Promise<void> {
+    await this.ensureGraph()
+  }
+
   async startMic(): Promise<void> {
     await this.ensureGraph()
     this.disconnectSource()
@@ -66,26 +71,47 @@ export class AudioEngine {
   async loadFile(file: File): Promise<void> {
     await this.ensureGraph()
     this.disconnectSource()
+
     const url = URL.createObjectURL(file)
     this.fileUrl = url
+
     const el = new Audio()
-    el.src = url
-    el.loop = true
     el.preload = 'auto'
+    el.loop = true
+    el.crossOrigin = 'anonymous'
+    el.src = url
     this.audioEl = el
+
+    await this.waitForCanPlay(el)
+
     const src = this.ctx!.createMediaElementSource(el)
     src.connect(this.analyser!)
     this.source = src
     this.gain!.gain.value = 1
-    await el.play()
     this._kind = 'file'
-    this._playing = true
+
+    if (this.ctx!.state !== 'running') {
+      await this.ctx!.resume()
+    }
+
+    try {
+      await el.play()
+      this._playing = true
+    } catch {
+      // File is wired up; Play can start it under a fresh user gesture.
+      this._playing = false
+      el.pause()
+    }
   }
 
   async togglePause(): Promise<void> {
     if (this._kind === 'none' || !this.ctx) return
+
     if (this._kind === 'file' && this.audioEl) {
       if (this.audioEl.paused) {
+        if (this.ctx.state !== 'running') {
+          await this.ctx.resume()
+        }
         await this.audioEl.play()
         this._playing = true
       } else {
@@ -94,6 +120,7 @@ export class AudioEngine {
       }
       return
     }
+
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume()
       this._playing = true
@@ -138,6 +165,31 @@ export class AudioEngine {
     }
   }
 
+  private waitForCanPlay(el: HTMLAudioElement): Promise<void> {
+    if (el.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+      return Promise.resolve()
+    }
+
+    return new Promise((resolve, reject) => {
+      const onReady = () => {
+        cleanup()
+        resolve()
+      }
+      const onError = () => {
+        cleanup()
+        const detail = el.error?.message || 'Unsupported or unreadable audio file'
+        reject(new Error(detail))
+      }
+      const cleanup = () => {
+        el.removeEventListener('canplay', onReady)
+        el.removeEventListener('error', onError)
+      }
+      el.addEventListener('canplay', onReady)
+      el.addEventListener('error', onError)
+      el.load()
+    })
+  }
+
   private disconnectSource(): void {
     if (this.source) {
       this.source.disconnect()
@@ -150,7 +202,8 @@ export class AudioEngine {
     }
     if (this.audioEl) {
       this.audioEl.pause()
-      this.audioEl.src = ''
+      this.audioEl.removeAttribute('src')
+      this.audioEl.load()
       this.audioEl = null
     }
     if (this.fileUrl) {

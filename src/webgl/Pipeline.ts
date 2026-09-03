@@ -183,6 +183,10 @@ export class Pipeline {
     this.raf = 0
   }
 
+  async unlockAudio(): Promise<void> {
+    await this.audio.unlock()
+  }
+
   async startMic(): Promise<void> {
     await this.audio.startMic()
   }

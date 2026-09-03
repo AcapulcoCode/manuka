@@ -10,6 +10,7 @@ export type OverlayProps = {
   fileName: string | null
   error: string | null
   onMic: () => void
+  onPrepareFile: () => void
   onFile: (file: File) => void
   onPause: () => void
   onPreset: (id: number) => void
@@ -24,6 +25,7 @@ export function Overlay({
   fileName,
   error,
   onMic,
+  onPrepareFile,
   onFile,
   onPause,
   onPreset,
@@ -54,7 +56,10 @@ export function Overlay({
           <button
             type="button"
             className="hud-btn"
-            onClick={() => fileRef.current?.click()}
+            onClick={() => {
+              onPrepareFile()
+              fileRef.current?.click()
+            }}
           >
             Load file
           </button>

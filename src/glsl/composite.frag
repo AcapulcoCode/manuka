@@ -85,6 +85,7 @@ void main() {
   bloomRadius *= mix(1.0, 0.72, wClean);
   bloomRadius *= mix(1.0, 1.65, wNeon);
   bloomRadius *= mix(1.0, 1.28, wFilm);
+  bloomRadius = mix(bloomRadius, 3.2, sacred);
 
   vec3 bloom = gatherBloom(sampleUv, thresh, bloomRadius);
 
@@ -92,9 +93,24 @@ void main() {
   bloomAmt *= mix(1.0, 0.18, wClean);
   bloomAmt *= mix(1.0, 2.45, wNeon);
   bloomAmt *= mix(1.0, 1.45, wFilm);
+  bloomAmt = mix(bloomAmt, 0.38, sacred);
 
   col += bloom * bloomAmt;
   col += bloom * lattice * (0.04 + uBass * 0.05) * mix(1.0, 0.15, wClean);
+
+  // Sacred: light god-ray streak from the bright core (screen-space assist).
+  if (sacred > 0.5) {
+    vec3 shafts = vec3(0.0);
+    float clen = length(c) + 1e-4;
+    for (int i = 1; i <= 8; i++) {
+      float fi = float(i) / 8.0;
+      vec2 suv = 0.5 + c * (1.0 - fi * 0.42);
+      vec3 s = texture2D(uFeedback, suv).rgb;
+      shafts += max(s - vec3(0.48), 0.0) * (1.0 - fi);
+    }
+    float spoke = pow(0.5 + 0.5 * cos(atan(c.y, c.x) * 8.0 - uTime * 0.07), 3.0);
+    col += (shafts * 0.025) * (0.45 + spoke * 0.55) * 0.5;
+  }
 
   col *= uExposure * mix(1.0, 1.05, storm) * mix(1.0, 0.96, lattice) * mix(1.0, 1.02, torus) * mix(1.0, 1.04, sacred);
   col *= mix(1.0, 1.08, wNeon);

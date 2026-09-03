@@ -40,9 +40,9 @@ void main() {
     decay = mix(decay, 0.48, 0.4);
     cap = 1.08;
   } else {
-    warpAmt *= 0.22;
-    decay = mix(decay, 0.44, 0.4);
-    cap = 1.0;
+    warpAmt *= 0.08;
+    decay = mix(decay, 0.28, 0.55);
+    cap = 0.95;
   }
 
   vec2 centered = uv - 0.5;
@@ -52,7 +52,7 @@ void main() {
   } else if (uPreset >= 2.5 && uPreset < 3.5) {
     ang = 0.0;
   } else if (sacred > 0.5) {
-    ang = sin(uTime * 0.04) * warpAmt * 0.0015;
+    ang = 0.0;
   }
   float ca = cos(ang);
   float sa = sin(ang);
@@ -63,18 +63,20 @@ void main() {
   } else if (torus > 0.5) {
     uv += vec2(wave, sin(uv.y * 12.0 + uTime) * 0.25) * warpAmt * (0.007 + uMid * 0.012);
   } else if (sacred > 0.5) {
-    uv += vec2(wave, wave * 0.35) * warpAmt * 0.002;
+    // Keep feedback registered — no smear drift.
   } else {
     uv += vec2(wave, sin(uv.x * 18.0 + uTime) * 0.45) * warpAmt * (0.008 + uMid * 0.014);
   }
   if (sacred > 0.5) {
-    uv += vec2(uRms * 0.0003, 0.0);
+    // no lateral audio shove
   } else {
     uv += vec2(uBass * 0.0016, 0.0);
   }
   float zoom = 0.0045;
   if (uPreset < 0.5 || (uPreset >= 2.5 && uPreset < 3.5)) {
     zoom += uBeat * 0.005;
+  } else if (sacred > 0.5) {
+    zoom = 0.0018;
   }
   uv = (uv - 0.5) * (1.0 - zoom) + 0.5;
 
