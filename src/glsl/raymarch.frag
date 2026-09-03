@@ -192,8 +192,7 @@ float mapTorusPreset(vec3 p) {
 }
 
 #define SACRED_PI 3.14159265
-#define GIRIH_XY 2.35
-#define GIRIH_Z 2.6
+#define GIRIH_Z 2.4
 
 vec2 kaleido2(vec2 p, float n) {
   float a = atan(p.y, p.x);
@@ -207,49 +206,62 @@ float sdGirihRosette(vec2 p, float thick) {
   float d = 1e9;
   vec2 ap = abs(p);
 
-  d = min(d, abs(max(ap.x, ap.y) - 0.88) - thick);
-  d = min(d, abs(ap.x + ap.y - 0.92) - thick * 0.95);
+  // Dense 8-fold girih: frames, stars, and interlocking arcs near the hub.
+  d = min(d, abs(max(ap.x, ap.y) - 1.05) - thick);
+  d = min(d, abs(ap.x + ap.y - 1.12) - thick);
   d = min(d, abs(ap.x - ap.y) - thick * 0.95);
-  d = min(d, abs(ap.x - 0.52) - thick * 0.9);
-  d = min(d, abs(ap.y - 0.52) - thick * 0.9);
-  d = min(d, abs(length(p) - 0.52) - thick * 0.85);
-  d = min(d, abs(length(p) - 0.28) - thick * 0.75);
-  d = min(d, abs(length(p - vec2(0.52, 0.0)) - 0.28) - thick * 0.75);
+  d = min(d, abs(ap.x - 0.62) - thick * 0.92);
+  d = min(d, abs(ap.y - 0.62) - thick * 0.92);
+  d = min(d, abs(length(p) - 0.95) - thick * 0.9);
+  d = min(d, abs(length(p) - 0.62) - thick * 0.88);
+  d = min(d, abs(length(p) - 0.34) - thick * 0.85);
+  d = min(d, abs(length(p) - 0.14) - thick * 0.8);
+  d = min(d, abs(length(p - vec2(0.62, 0.0)) - 0.34) - thick * 0.82);
+  d = min(d, abs(length(p - vec2(0.34, 0.0)) - 0.34) - thick * 0.8);
+  d = min(d, length(p) - thick * 1.35);
 
   return d;
 }
 
-float girihPanel(vec3 q, float thick, float slab) {
+float girihDisc(vec3 q, float thick, float slab) {
   q.xy = kaleido2(q.xy, 8.0);
   float lines = sdGirihRosette(q.xy, thick);
+  // Bound to a disc so side copies don't dilute the centered tunnel.
+  float disc = length(q.xy) - 1.18;
+  lines = max(lines, disc);
   lines = max(lines, abs(q.z) - slab);
   return lines;
 }
 
 float girihScroll() {
-  return uTime * 0.38;
+  return uTime * 0.55;
 }
 
 float mapSacred(vec3 p) {
   float scroll = girihScroll();
+  // World scrolls toward the camera; camera stays on the tunnel axis.
   p.z += scroll;
 
-  vec3 q = mod(p + vec3(GIRIH_XY, GIRIH_XY, GIRIH_Z) * 0.5, vec3(GIRIH_XY, GIRIH_XY, GIRIH_Z))
-    - vec3(GIRIH_XY, GIRIH_XY, GIRIH_Z) * 0.5;
+  float qz = mod(p.z + GIRIH_Z * 0.5, GIRIH_Z) - GIRIH_Z * 0.5;
+  vec3 q = vec3(p.xy, qz);
 
-  float spin = scroll * 0.12 + sin(scroll * 0.17) * (0.04 + uMid * 0.05);
+  float spin = scroll * 0.11 + sin(scroll * 0.15) * (0.05 + uMid * 0.06);
   q.xy *= rot2(spin);
 
-  float thick = 0.016 + uHigh * 0.005 + uRms * 0.004;
-  float slab = 0.028 + uRms * 0.004;
-  return girihPanel(q, thick, slab) * 0.46;
+  float thick = 0.028 + uHigh * 0.01 + uRms * 0.006;
+  float slab = 0.07 + uBass * 0.012;
+  float d = girihDisc(q, thick, slab);
+
+  // Outer tunnel ring keeps the periphery filled while you fly the hub.
+  float ring = abs(length(p.xy) - 1.35) - (0.045 + uMid * 0.02);
+  d = min(d, ring);
+
+  return d * 0.55;
 }
 
 void sacredCamera(out vec3 ro, out vec3 uu, out vec3 vv, out vec3 ww) {
-  float scroll = girihScroll();
-
-  // Stay on the rosette hub; scroll matches mapSacred so panels meet the lens centered.
-  ro = vec3(0.0, 0.0, -scroll);
+  // Locked to the medallion center; geometry scrolls past along +Z.
+  ro = vec3(0.0, 0.0, 0.0);
   ww = vec3(0.0, 0.0, 1.0);
   uu = vec3(1.0, 0.0, 0.0);
   vv = vec3(0.0, 1.0, 0.0);
@@ -364,7 +376,7 @@ void main() {
   } else {
     sacredCamera(ro, uu, vv, ww);
     ta = ro + ww * 3.5;
-    foc = 1.08;
+    foc = 1.25;
   }
 
   vec3 rd = normalize(uv.x * uu + uv.y * vv + foc * ww);
@@ -399,8 +411,8 @@ void main() {
       float innerGlow = exp(-mapToriOnly(p) * 14.0);
       haze += audioPal * innerGlow * (0.04 + uRms * 0.06) * exp(-tMarch * 0.012);
     } else if (sacred > 0.5) {
-      float mandala = exp(-mapSacred(p) * 12.0);
-      haze += audioPal * mandala * (0.035 + uMid * 0.05) * exp(-tMarch * 0.014);
+      float mandala = exp(-mapSacred(p) * 9.0);
+      haze += audioPal * mandala * (0.05 + uMid * 0.06) * exp(-tMarch * 0.012);
     }
     if (d < SURF) {
       hit = 1.0;
@@ -469,19 +481,20 @@ void main() {
       col = mix(col, audioPal * 0.05, 1.0 - fog);
       col *= fog;
     } else if (sacred > 0.5) {
-      fog = exp(-tMarch * 0.011);
-      vec3 qg = mod(p + vec3(GIRIH_XY, GIRIH_XY, GIRIH_Z) * 0.5, vec3(GIRIH_XY, GIRIH_XY, GIRIH_Z))
-        - vec3(GIRIH_XY, GIRIH_XY, GIRIH_Z) * 0.5;
+      fog = exp(-tMarch * 0.01);
+      float scroll = girihScroll();
+      vec3 qg = vec3(p.xy, mod(p.z + scroll + GIRIH_Z * 0.5, GIRIH_Z) - GIRIH_Z * 0.5);
+      qg.xy *= rot2(scroll * 0.11);
       qg.xy = kaleido2(qg.xy, 8.0);
       albedo = palForPreset(
-        length(qg.xy) * 0.22 + uTime * 0.05 + uMid * 0.35 + uHigh * 0.25
+        length(qg.xy) * 0.2 + uTime * 0.05 + uMid * 0.35 + uHigh * 0.25
       );
-      float emit = 0.16 + uBass * 0.28 + uBeat * 0.14 + uMid * 0.16;
-      col = albedo * (0.14 + diff * 0.62 + emit)
-        + fres * audioPal * (0.32 + uHigh * 0.28)
-        + specu * vec3(1.0, 0.94, 0.72) * (0.16 + uHigh * 0.22);
-      col = mix(col, audioPal * 0.06, 1.0 - fog);
-      col *= mix(1.0, 0.84, fog);
+      float emit = 0.22 + uBass * 0.3 + uBeat * 0.14 + uMid * 0.18;
+      col = albedo * (0.18 + diff * 0.55 + emit)
+        + fres * audioPal * (0.36 + uHigh * 0.28)
+        + specu * vec3(1.0, 0.94, 0.72) * (0.18 + uHigh * 0.22);
+      col = mix(col, audioPal * 0.07, 1.0 - fog);
+      col *= mix(1.0, 0.86, fog);
     } else {
       col = albedo * (0.12 + diff * 0.72)
         + specu * vec3(1.0, 0.96, 0.9) * (0.22 + uHigh * 0.28)
